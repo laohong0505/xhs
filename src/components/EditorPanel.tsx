@@ -648,6 +648,28 @@ export default function EditorPanel({
               </div>
             )}
 
+            {/* Color Inspiration Button */}
+            <div className="pt-1 pb-1">
+              <button
+                onClick={() => {
+                  const randomGradient = PRESET_GRADIENTS[Math.floor(Math.random() * PRESET_GRADIENTS.length)];
+                  setBackground(prev => ({
+                    ...prev,
+                    type: 'gradient',
+                    gradient: {
+                      type: 'linear',
+                      angle: Math.floor(Math.random() * 360),
+                      stops: randomGradient.stops
+                    }
+                  }));
+                }}
+                className="w-full py-2.5 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 hover:from-indigo-500/30 hover:to-purple-500/30 border border-indigo-500/30 text-indigo-300 rounded-xl font-medium text-xs transition duration-200 flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                一键配色灵感 (随机高级渐变)
+              </button>
+            </div>
+
             {/* Background Style Switcher */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-slate-400">背景填充类型</label>
