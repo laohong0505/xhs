@@ -1,0 +1,6 @@
+{
+  "name": "小红书封面生成器",
+  "description": "一款专为小红书创作者打造的在线封面设计工具，提供丰富的精美文字排版、阴影描边、贴纸、绚丽渐变背景和经典模板，支持一键导出高清封面。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
