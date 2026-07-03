@@ -22,8 +22,8 @@ function getAiClient(customKey?: string, customUrl?: string): GoogleGenAI {
 
   return new GoogleGenAI({
     apiKey: activeKey,
-    baseURL: activeUrl,
     httpOptions: {
+      baseUrl: activeUrl,
       headers: {
         'User-Agent': 'aistudio-build',
       }

@@ -18,7 +18,10 @@ import {
   RotateCcw,
   CheckCircle,
   FolderDown,
-  Info
+  Info,
+  Save,
+  FolderOpen,
+  Upload
 } from 'lucide-react';
 
 interface HistoryState {
@@ -35,6 +38,32 @@ export default function App() {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(TEMPLATES[0].elements[0]?.id || null);
   const [safeZoneVisible, setSafeZoneVisible] = useState<boolean>(true);
   const [canvasScale, setCanvasScale] = useState<number>(0.8);
+
+  // Draft & Import/Export states
+  const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(TEMPLATES[0].id);
+  const [hasSavedDraft, setHasSavedDraft] = useState<boolean>(() => {
+    try {
+      return !!localStorage.getItem('xhs_cover_draft');
+    } catch {
+      return false;
+    }
+  });
+  const [toast, setToast] = useState<{ show: boolean; msg: string; type: 'success' | 'info' | 'error' } | null>(null);
+  
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const showToast = (msg: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setToast({ show: true, msg, type });
+  };
+
+  useEffect(() => {
+    if (toast?.show) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Undo/Redo state
   const [history, setHistory] = useState<HistoryState[]>([]);
@@ -130,6 +159,137 @@ export default function App() {
       setHistoryIndex(nextIdx);
       setSelectedElementId(null);
     }
+  };
+
+  // Save current design state to localStorage as a draft
+  const handleSaveDraft = () => {
+    try {
+      const draftState = {
+        version: '1.0',
+        aspectRatio,
+        background,
+        elements,
+        currentTemplateId,
+      };
+      localStorage.setItem('xhs_cover_draft', JSON.stringify(draftState));
+      setHasSavedDraft(true);
+      showToast('✨ 封面草稿已成功保存在本地浏览器！过段时间来依然可以微调。', 'success');
+    } catch (err) {
+      showToast('❌ 保存本地草稿失败，可能浏览器隐私模式限制了存储。', 'error');
+    }
+  };
+
+  // Load design state from localStorage draft
+  const handleLoadDraft = () => {
+    try {
+      const savedStr = localStorage.getItem('xhs_cover_draft');
+      if (!savedStr) {
+        showToast('ℹ️ 暂无保存的本地草稿。', 'info');
+        return;
+      }
+      const draft = JSON.parse(savedStr);
+      setAspectRatio(draft.aspectRatio || '3:4');
+      setBackground(JSON.parse(JSON.stringify(draft.background)));
+      setElements(JSON.parse(JSON.stringify(draft.elements)));
+      setCurrentTemplateId(draft.currentTemplateId || null);
+      setSelectedElementId(draft.elements[0]?.id || null);
+      
+      commitToHistory(draft.aspectRatio || '3:4', draft.background, draft.elements);
+      showToast('🎉 已成功载入您上次保存的封面草稿！', 'success');
+    } catch (err) {
+      showToast('❌ 加载草稿失败，可能草稿数据已损坏。', 'error');
+    }
+  };
+
+  // Reset current template elements and background to its clean state
+  const handleResetTemplate = () => {
+    if (!currentTemplateId) {
+      showToast('ℹ️ 当前画布无关联的初始模板，无法复位。', 'info');
+      return;
+    }
+    const template = TEMPLATES.find((t) => t.id === currentTemplateId);
+    if (!template) {
+      showToast('❌ 未找到关联的初始模板，无法重置。', 'error');
+      return;
+    }
+    
+    setAspectRatio(template.aspectRatio);
+    setBackground(JSON.parse(JSON.stringify(template.background)));
+    
+    // Copy elements with brand new IDs to avoid conflicts
+    const copiedElements = template.elements.map((el) => {
+      return {
+        ...JSON.parse(JSON.stringify(el)),
+        id: Math.random().toString(36).substring(2, 9),
+      };
+    });
+    setElements(copiedElements);
+    setSelectedElementId(copiedElements[0]?.id || null);
+    
+    commitToHistory(template.aspectRatio, template.background, copiedElements);
+    showToast('🔄 已成功复位到该模版的初始状态，之前的所有修改已清除！', 'info');
+  };
+
+  // Export current design to a JSON project file
+  const handleExportProject = () => {
+    try {
+      const projectData = {
+        app: 'xhs-cover-designer',
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        aspectRatio,
+        background,
+        elements,
+        currentTemplateId,
+      };
+      const jsonStr = JSON.stringify(projectData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `xhs-cover-project-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showToast('📥 封面工程项目 JSON 文件已成功导出！您可以随时在其他电脑导入继续微调。', 'success');
+    } catch (err) {
+      showToast('❌ 导出工程项目失败，请重试。', 'error');
+    }
+  };
+
+  // Import project JSON file and load onto canvas
+  const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const jsonStr = event.target?.result as string;
+        const project = JSON.parse(jsonStr);
+        
+        if (!project.elements || !project.background) {
+          showToast('❌ 导入失败：该 JSON 文件不包含有效的封面设计工程数据。', 'error');
+          return;
+        }
+        
+        setAspectRatio(project.aspectRatio || '3:4');
+        setBackground(JSON.parse(JSON.stringify(project.background)));
+        setElements(JSON.parse(JSON.stringify(project.elements)));
+        setCurrentTemplateId(project.currentTemplateId || null);
+        setSelectedElementId(project.elements[0]?.id || null);
+        
+        commitToHistory(project.aspectRatio || '3:4', project.background, project.elements);
+        showToast('📤 封面工程项目上传解析成功！现在可以继续微调您的设计了。', 'success');
+      } catch (err) {
+        showToast('❌ 读取工程文件失败，可能 JSON 格式损坏。', 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // allow uploading same file again
   };
 
   // Update a single element and queue an optional history save
@@ -371,7 +531,7 @@ export default function App() {
         </div>
 
         {/* Workspace Undo/Redo & Utility Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Undo Button */}
           <button
             onClick={handleUndo}
@@ -392,7 +552,63 @@ export default function App() {
             <Redo2 className="w-4 h-4" />
           </button>
 
-          <div className="h-6 w-[1px] bg-slate-800 mx-1" />
+          <div className="h-6 w-[1px] bg-slate-800 mx-0.5 sm:mx-1" />
+
+          {/* Reset Template */}
+          <button
+            onClick={handleResetTemplate}
+            disabled={!currentTemplateId}
+            className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 hover:text-amber-400 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer flex items-center gap-1.5"
+            title="重置为当前模板的初始状态"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">复位模板</span>
+          </button>
+
+          {/* Save Draft */}
+          <button
+            onClick={handleSaveDraft}
+            className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 hover:text-green-400 transition cursor-pointer flex items-center gap-1.5"
+            title="保存当前设计作为本地草稿"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">保存草稿</span>
+          </button>
+
+          {/* Load Draft */}
+          <button
+            onClick={handleLoadDraft}
+            disabled={!hasSavedDraft}
+            className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-400 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer flex items-center gap-1.5"
+            title="恢复保存在本地浏览器的草稿"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">恢复草稿</span>
+          </button>
+
+          <div className="h-6 w-[1px] bg-slate-800 mx-0.5 sm:mx-1" />
+
+          {/* Import JSON Project */}
+          <button
+            onClick={() => importInputRef.current?.click()}
+            className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 hover:border-indigo-900/30 hover:bg-indigo-950/10 text-xs font-semibold text-slate-300 hover:text-indigo-400 transition cursor-pointer flex items-center gap-1.5"
+            title="上传已导出的 JSON 工程文件进行二次修改"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">上传修改</span>
+          </button>
+
+          {/* Export JSON Project */}
+          <button
+            onClick={handleExportProject}
+            className="px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900 hover:border-indigo-900/30 hover:bg-indigo-950/10 text-xs font-semibold text-slate-300 hover:text-indigo-400 transition cursor-pointer flex items-center gap-1.5"
+            title="导出当前设计为工程 JSON 备份文件，以便下次上传修改"
+          >
+            <FolderDown className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">备份工程</span>
+          </button>
+
+          <div className="h-6 w-[1px] bg-slate-800 mx-0.5 sm:mx-1" />
 
           {/* Clear Canvas */}
           <button
@@ -539,6 +755,14 @@ export default function App() {
           addElement={addElement}
           safeZoneVisible={safeZoneVisible}
           setSafeZoneVisible={setSafeZoneVisible}
+          currentTemplateId={currentTemplateId}
+          setCurrentTemplateId={setCurrentTemplateId}
+          hasSavedDraft={hasSavedDraft}
+          onSaveDraft={handleSaveDraft}
+          onLoadDraft={handleLoadDraft}
+          onResetTemplate={handleResetTemplate}
+          onExportProject={handleExportProject}
+          onImportProject={() => importInputRef.current?.click()}
         />
       </div>
 
@@ -552,6 +776,27 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Floating dynamic status toast */}
+      {toast?.show && (
+        <div id="dynamic-toast" className="fixed bottom-6 left-6 z-50 bg-slate-900 border border-slate-800 text-slate-200 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-bottom duration-300">
+          {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />}
+          {toast.type === 'info' && <Info className="w-5 h-5 text-blue-400 shrink-0" />}
+          {toast.type === 'error' && <Info className="w-5 h-5 text-rose-400 shrink-0" />}
+          <div className="text-xs font-medium">
+            {toast.msg}
+          </div>
+        </div>
+      )}
+
+      {/* Hidden Import file input trigger */}
+      <input
+        type="file"
+        ref={importInputRef}
+        onChange={handleImportProject}
+        style={{ display: 'none' }}
+        accept=".json"
+      />
 
       {/* Help Instructions Dialog Modal */}
       {showHelpModal && (

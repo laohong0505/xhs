@@ -24,7 +24,7 @@ export interface TextBgConfig {
   borderRadius: number;
   borderWidth: number;
   borderColor: string;
-  skew: number; // in degrees for dynamic brutalist effects
+  skew?: number; // in degrees for dynamic brutalist effects
 }
 
 export interface TextElement {
@@ -47,7 +47,7 @@ export interface TextElement {
   lineHeight: number; // multiplier (e.g. 1.2)
   shadow: ShadowConfig;
   stroke: StrokeConfig;
-  bg: TextBgConfig;
+  bg?: TextBgConfig;
 }
 
 export interface StickerElement {

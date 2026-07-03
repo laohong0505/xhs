@@ -27,6 +27,10 @@ import {
   Maximize2,
   HelpCircle,
   Wand2,
+  Save,
+  FolderOpen,
+  Upload,
+  FolderDown,
 } from 'lucide-react';
 
 interface EditorPanelProps {
@@ -43,6 +47,14 @@ interface EditorPanelProps {
   addElement: (type: 'text' | 'sticker' | 'shape', options?: any) => void;
   safeZoneVisible: boolean;
   setSafeZoneVisible: (visible: boolean) => void;
+  currentTemplateId: string | null;
+  setCurrentTemplateId: (id: string | null) => void;
+  hasSavedDraft: boolean;
+  onSaveDraft: () => void;
+  onLoadDraft: () => void;
+  onResetTemplate: () => void;
+  onExportProject: () => void;
+  onImportProject: () => void;
 }
 
 const PRESET_GRADIENTS = [
@@ -89,36 +101,16 @@ export default function EditorPanel({
   addElement,
   safeZoneVisible,
   setSafeZoneVisible,
+  currentTemplateId,
+  setCurrentTemplateId,
+  hasSavedDraft,
+  onSaveDraft,
+  onLoadDraft,
+  onResetTemplate,
+  onExportProject,
+  onImportProject,
 }: EditorPanelProps) {
-  const [activeTab, setActiveTab] = useState<'ai' | 'templates' | 'background' | 'text' | 'stickers' | 'shapes' | 'layers'>('ai');
-
-  // AI Generator state
-  const [draftText, setDraftText] = useState('');
-  const [preferredVibe, setPreferredVibe] = useState('auto');
-  const [customApiKey, setCustomApiKey] = useState(() => {
-    try {
-      return localStorage.getItem('xhs_custom_api_key') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [customApiUrl, setCustomApiUrl] = useState(() => {
-    try {
-      return localStorage.getItem('xhs_custom_api_url') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [genError, setGenError] = useState<string | null>(null);
-  const [lastGenResult, setLastGenResult] = useState<{
-    recommendedTemplateId: string;
-    mainTitle: string;
-    subtitle: string;
-    highlights: string[];
-    emojis: string[];
-    justification: string;
-  } | null>(null);
+  const [activeTab, setActiveTab] = useState<'templates' | 'background' | 'text' | 'stickers' | 'shapes' | 'layers' | 'drafts'>('templates');
 
   // Find the currently selected element
   const selectedElement = elements.find((el) => el.id === selectedElementId);
@@ -143,6 +135,7 @@ export default function EditorPanel({
   const handleApplyTemplate = (template: Template) => {
     setAspectRatio(template.aspectRatio);
     setBackground(JSON.parse(JSON.stringify(template.background)));
+    setCurrentTemplateId(template.id);
     
     // Copy elements with brand new IDs to avoid ID conflicts
     const copiedElements = template.elements.map((el) => {
@@ -153,78 +146,6 @@ export default function EditorPanel({
     });
     setElements(copiedElements);
     setSelectedElementId(copiedElements[0]?.id || null);
-  };
-
-  // AI-powered cover content applicator
-  const handleAiGenerate = async () => {
-    if (!draftText.trim()) {
-      setGenError('请输入您的笔记文案内容或创意灵感草稿！');
-      return;
-    }
-
-    setIsGenerating(true);
-    setGenError(null);
-
-    try {
-      const response = await fetch('/api/gemini/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          draftText,
-          preferredCategory: preferredVibe === 'auto' ? undefined : preferredVibe,
-          apiKey: customApiKey.trim() || undefined,
-          apiUrl: customApiUrl.trim() || undefined,
-        }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        let errMsg = errData.error || errData.message;
-        if (typeof errData.error === 'object' && errData.error !== null) {
-          errMsg = errData.error.message || JSON.stringify(errData.error);
-        }
-        
-        if (typeof errMsg === 'string' && (errMsg.includes('high demand') || errMsg.includes('503') || response.status === 503)) {
-           errMsg = '当前 AI 模型请求量过大，API 限流中，请稍等几秒后再次点击重试！(503 High Demand)';
-        }
-
-        throw new Error(errMsg || `请求失败（错误码 ${response.status}）。请确认您已配置了有效的 API 密钥，或者在下方输入了正确的自定义 Key 和代理地址。`);
-      }
-
-      const data = await response.json();
-      
-      // We expect the AI to return `background` and `elements` directly
-      if (!data || !data.background || !data.elements) {
-        throw new Error('AI 返回的数据格式不正确，请重试');
-      }
-
-      setLastGenResult(data);
-
-      // The AI generates for 3:4 canvas aspect ratio by default
-      setAspectRatio('3:4');
-      
-      // Update background
-      setBackground(data.background);
-
-      // Give elements fresh local IDs and apply to canvas
-      const generatedElements = data.elements.map((el: any) => {
-        const newId = Math.random().toString(36).substring(2, 9);
-        return {
-          ...el,
-          id: newId
-        };
-      });
-
-      setElements(generatedElements);
-      setSelectedElementId(generatedElements[0]?.id || null);
-    } catch (err: any) {
-      console.error('AI Cover Generation error:', err);
-      setGenError(err.message || '网络或接口故障，请稍后重试');
-    } finally {
-      setIsGenerating(false);
-    }
   };
 
 
@@ -325,13 +246,13 @@ export default function EditorPanel({
       {/* Tab bar header */}
       <div className="flex border-b border-slate-800 bg-slate-950/40 px-2 overflow-x-auto scrollbar-none shrink-0">
         {[
-          { id: 'ai', label: 'AI爆款生成', icon: Wand2 },
           { id: 'templates', label: '模板', icon: Sparkles },
           { id: 'background', label: '背景', icon: ImageIcon },
           { id: 'text', label: '文字', icon: Type },
           { id: 'stickers', label: '贴纸', icon: Smile },
           { id: 'shapes', label: '形状', icon: TriangleIcon },
           { id: 'layers', label: '图层', icon: Layers },
+          { id: 'drafts', label: '草稿/备份', icon: Save },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -354,195 +275,6 @@ export default function EditorPanel({
 
       {/* Editor Content Area */}
       <div className="flex-1 overflow-y-auto p-5 space-y-6 select-none text-slate-200">
-        
-        {/* TAB 0: AI VIRAL GENERATOR */}
-        {activeTab === 'ai' && (
-          <div className="space-y-5">
-            <div className="bg-gradient-to-r from-pink-500/10 to-violet-500/10 p-4 rounded-2xl border border-pink-500/20 space-y-2">
-              <div className="flex items-center gap-2">
-                <Wand2 className="w-4 h-4 text-pink-400" />
-                <h3 className="text-sm font-bold text-slate-100">AI 爆款大纲智能生成器</h3>
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                只需输入你的小红书笔记文案、大纲或灵感，AI 会智能推荐最契合的排版模板，并一键定制吸睛的核心大字标题与干货亮点！
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-400 block">
-                输入您的笔记文案 / 创意灵感草稿
-              </label>
-              <textarea
-                rows={5}
-                value={draftText}
-                onChange={(e) => setDraftText(e.target.value)}
-                placeholder="例如：我做了一个自律学习app，想跟大家分享我是怎么克服拖延症的，我的秘诀是：1. 康奈尔笔记法，2. 番茄时间专注。希望给考研党一些参考建议..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none placeholder:text-slate-600 resize-none font-sans"
-              />
-            </div>
-
-            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3.5 space-y-3">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                  🔑 智能排版密钥设置
-                </span>
-                <p className="text-[10.5px] leading-relaxed text-slate-400">
-                  <span className="font-semibold text-pink-400">为什么要输入 Key？</span>
-                  本系统基于前沿的大语言模型进行智能分析。当您输入笔记草稿或创意灵感后，AI 将自动提炼出极具爆款吸引力的主标题、副标题与三条核心干货亮点，并智能推荐、一键套用最匹配的封面设计及热门贴纸。
-                  使用自定义密钥，可为您带来<span className="text-white font-medium">更稳定、更快速</span>的专属生成体验，免受公共免费额度与频次限制的影响。
-                </p>
-              </div>
-
-              <div className="space-y-2 pt-1.5 border-t border-slate-800/60">
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-semibold text-slate-400">API 访问密钥 (API Key)</span>
-                    <span className="text-[10px] text-slate-500 font-normal">可选，未填时使用内置通道</span>
-                  </div>
-                  <input
-                    type="password"
-                    value={customApiKey}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCustomApiKey(val);
-                      try {
-                        localStorage.setItem('xhs_custom_api_key', val);
-                      } catch (err) {}
-                    }}
-                    placeholder="输入您的 API Key (如 sk-... 或 AI 密钥)"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-pink-500 focus:outline-none placeholder:text-slate-600"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-semibold text-slate-400">自定义 API 代理地址 (Base URL)</span>
-                    <span className="text-[10px] text-slate-500 font-normal">国内或代理渠道可选填</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={customApiUrl}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCustomApiUrl(val);
-                      try {
-                        localStorage.setItem('xhs_custom_api_url', val);
-                      } catch (err) {}
-                    }}
-                    placeholder="例如: https://api.your-proxy.com"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:border-pink-500 focus:outline-none placeholder:text-slate-600"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-400 block">
-                意向风格偏好（选填）
-              </label>
-              <select
-                value={preferredVibe}
-                onChange={(e) => setPreferredVibe(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:border-pink-500 focus:outline-none cursor-pointer"
-              >
-                <option value="auto">🌟 AI 自动根据文案调性推荐</option>
-                <option value="brutalist-yellow">重金属酸性极简 (brutalist)</option>
-                <option value="qa-card-minimal">深夜倾诉问答卡片 (minimal/emotional)</option>
-                <option value="vlog-aesthetic-sunset">黄昏慵懒生活随笔 (vlog)</option>
-                <option value="cute-sticker-bomb">可爱碎花拼贴手账 (cute)</option>
-                <option value="minimal-grid-tech">硬核数码极简网格 (tech)</option>
-                <option value="hot-sale-brutalist">爆款红黑高瞩目风 (hot warning)</option>
-                <option value="beauty-makeup-rose">法式优雅美妆浪漫粉 (beauty)</option>
-                <option value="food-recipe-cream">温暖奶油萌系食记 (food)</option>
-                <option value="study-notes-paper">自律高效手账格子本 (study)</option>
-                <option value="travel-adventure">野生野奢户外探索指南 (travel)</option>
-              </select>
-            </div>
-
-            <button
-              onClick={handleAiGenerate}
-              disabled={isGenerating}
-              className="w-full py-3 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 disabled:from-slate-850 disabled:to-slate-850 disabled:text-slate-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-pink-500/15 active:scale-95 transition duration-150 flex items-center justify-center gap-2 cursor-pointer shrink-0"
-            >
-              {isGenerating ? (
-                <>
-                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <span>正在深度解析并排版设计...</span>
-                </>
-              ) : (
-                <>
-                  <Wand2 className="w-3.5 h-3.5" />
-                  <span>AI 智能生成排版封面</span>
-                </>
-              )}
-            </button>
-
-            {genError && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] leading-relaxed">
-                🚨 {genError}
-              </div>
-            )}
-
-            {lastGenResult && (
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3.5 animate-in fade-in duration-300 text-slate-300">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <span className="text-xs font-bold text-pink-400 flex items-center gap-1">✨ AI 智能排版结果</span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    已套用: {TEMPLATES.find(t => t.id === lastGenResult.recommendedTemplateId)?.name || lastGenResult.recommendedTemplateId}
-                  </span>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">核心爆款标题：</span>
-                    <strong className="text-slate-100 font-bold text-sm">{lastGenResult.mainTitle}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">痛点爆款副标题：</span>
-                    <span className="text-slate-300 font-medium">{lastGenResult.subtitle}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 block">提取核心亮点：</span>
-                    <ul className="list-disc pl-4 text-slate-400 space-y-0.5">
-                      {lastGenResult.highlights.map((h, i) => (
-                        <li key={i}>{h}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="text-[11px] bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60 text-slate-400 italic">
-                  <strong>设计推荐理由：</strong>{lastGenResult.justification}
-                </div>
-              </div>
-            )}
-
-            {/* Little design suggestions / optimizations (结合小红书算法和风格的建议) */}
-            <div className="pt-4 border-t border-slate-800/80 space-y-3">
-              <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                小红书爆款封面视觉密码 & 算法建议
-              </h4>
-              <div className="space-y-2.5 text-[11px] text-slate-400 leading-relaxed">
-                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/50">
-                  <span className="font-bold text-slate-200 block">📈 1. 痛点醒目，前2秒黄金停留</span>
-                  小红书推荐算法极其看重首图点击率 (CTR)。封面中央大字必须足够显眼、字数要少（控制在10字内），让读者在瀑布流刷过时瞬间识别痛点利益。
-                </div>
-                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/50">
-                  <span className="font-bold text-slate-200 block">🎭 2. 情绪价值与反衬撞色</span>
-                  极简或高对比度的红、黄、黑撞色能帮助突破视觉盲区。使用「文字反色背景块（Highlighter）」并适当偏斜角度，能有效打破呆板排版，增加高潮情绪。
-                </div>
-                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/50">
-                  <span className="font-bold text-slate-200 block">🚨 3. 规避小红书安全区红线</span>
-                  发布笔记时顶部的10%和底部的15%容易被交互组件和长短边裁切遮挡。建议开启「安全区辅助线」使主标题处于中上部的安全红利区，保留完美观感。
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* TAB 1: TEMPLATES */}
         {activeTab === 'templates' && (
@@ -1887,6 +1619,102 @@ export default function EditorPanel({
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB 7: DRAFTS & BACKUP */}
+        {activeTab === 'drafts' && (
+          <div className="space-y-6 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
+            <div className="space-y-1.5">
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <Save className="w-4 h-4 text-emerald-400" />
+                本地草稿箱 (浏览器缓存)
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                无需注册，设计进度可即时暂存在当前浏览器的 LocalStorage 中。即便关闭页面或电脑，只要不清理缓存，下次打开仍能完美恢复！
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={onSaveDraft}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border border-slate-800 bg-slate-950/40 hover:bg-slate-800/40 hover:border-slate-700 hover:text-green-400 text-slate-300 transition-all cursor-pointer group text-center"
+              >
+                <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-400 group-hover:scale-110 transition-transform">
+                  <Save className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold">存入本地草稿</span>
+                <span className="text-[10px] text-slate-500">覆盖上次的设计</span>
+              </button>
+
+              <button
+                onClick={onLoadDraft}
+                disabled={!hasSavedDraft}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border border-slate-800 bg-slate-950/40 hover:bg-slate-800/40 hover:border-slate-700 hover:text-blue-400 text-slate-300 disabled:opacity-35 disabled:hover:text-slate-300 disabled:pointer-events-none transition-all cursor-pointer group text-center"
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                  <FolderOpen className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold">读取本地草稿</span>
+                <span className="text-[10px] text-slate-500">
+                  {hasSavedDraft ? '检测到可用草稿' : '暂无保存草稿'}
+                </span>
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-amber-500/10 bg-amber-500/5 text-amber-300 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold">
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                想要一键清空并重置？
+              </div>
+              <p className="text-[11px] text-amber-400/80 leading-relaxed">
+                如果您彻底改乱了，可以点击下方按钮，将画布完美复位到当前模板的最初状态。
+              </p>
+              <button
+                onClick={onResetTemplate}
+                disabled={!currentTemplateId}
+                className="w-full mt-1.5 py-2 px-3 rounded-lg border border-amber-500/20 bg-amber-500/10 hover:bg-amber-500/20 hover:border-amber-400 text-xs font-bold text-amber-300 hover:text-amber-200 transition disabled:opacity-25 disabled:pointer-events-none cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                复位模板 (还原出厂值)
+              </button>
+            </div>
+
+            <div className="h-[1px] bg-slate-800" />
+
+            <div className="space-y-1.5">
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <FolderDown className="w-4 h-4 text-indigo-400" />
+                工程项目备份 (外部文件)
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                想要换电脑操作，或作为项目源文件永久归档？可以导出为一个轻量的专属 JSON 工程文件，下次上传即可无损还原所有图层和参数！
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={onExportProject}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border border-slate-800 bg-slate-950/40 hover:bg-slate-800/40 hover:border-slate-700 hover:text-indigo-400 text-slate-300 transition-all cursor-pointer group text-center"
+              >
+                <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
+                  <FolderDown className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold">导出备份 (.json)</span>
+                <span className="text-[10px] text-slate-500">下载设计工程源文件</span>
+              </button>
+
+              <button
+                onClick={onImportProject}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl border border-slate-800 bg-slate-950/40 hover:bg-slate-800/40 hover:border-slate-700 hover:text-indigo-400 text-slate-300 transition-all cursor-pointer group text-center"
+              >
+                <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold">上传修改 (导入)</span>
+                <span className="text-[10px] text-slate-500">选择并加载 JSON 备份</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
