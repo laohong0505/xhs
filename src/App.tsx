@@ -133,6 +133,123 @@ export default function App() {
     };
   }, [aspectRatio, background, elements, historyIndex, history]);
 
+  // Handle aspect ratio change with auto-adaptation of all elements (positions, scale, fonts)
+  const handleSetAspectRatio = (newRatio: AspectRatio) => {
+    if (newRatio === aspectRatio) return;
+
+    const getRatioHeight = (ratio: AspectRatio) => {
+      if (ratio === '1:1') return 600;
+      if (ratio === '4:3') return 450;
+      return 800; // default for 3:4
+    };
+
+    const oldHeight = getRatioHeight(aspectRatio);
+    const newHeight = getRatioHeight(newRatio);
+    const scaleFactor = newHeight / oldHeight;
+
+    const scaledElements = elements.map((el) => {
+      const scaledY = Math.round(el.y * scaleFactor);
+
+      if (el.type === 'text') {
+        const textEl = el as TextElement;
+        const scaledFontSize = Math.max(10, Math.round(textEl.fontSize * scaleFactor));
+        const scaledHeight = Math.max(20, Math.round(textEl.height * scaleFactor));
+        // Keep the width unchanged since canvas width is always 600px across all ratios
+        const scaledWidth = textEl.width;
+
+        const scaledBg = textEl.bg ? {
+          ...textEl.bg,
+          paddingX: textEl.bg.paddingX ? Math.max(2, Math.round(textEl.bg.paddingX * scaleFactor)) : textEl.bg.paddingX,
+          paddingY: textEl.bg.paddingY ? Math.max(2, Math.round(textEl.bg.paddingY * scaleFactor)) : textEl.bg.paddingY,
+          borderRadius: textEl.bg.borderRadius ? Math.max(0, Math.round(textEl.bg.borderRadius * scaleFactor)) : textEl.bg.borderRadius,
+          borderWidth: textEl.bg.borderWidth ? Math.max(0, Math.round(textEl.bg.borderWidth * scaleFactor)) : textEl.bg.borderWidth,
+        } : undefined;
+
+        const scaledShadow = textEl.shadow ? {
+          ...textEl.shadow,
+          x: textEl.shadow.x ? Math.round(textEl.shadow.x * scaleFactor) : textEl.shadow.x,
+          y: textEl.shadow.y ? Math.round(textEl.shadow.y * scaleFactor) : textEl.shadow.y,
+          blur: textEl.shadow.blur ? Math.max(0, Math.round(textEl.shadow.blur * scaleFactor)) : textEl.shadow.blur,
+        } : textEl.shadow;
+
+        const scaledStroke = textEl.stroke ? {
+          ...textEl.stroke,
+          width: textEl.stroke.width ? Math.max(1, Math.round(textEl.stroke.width * scaleFactor)) : textEl.stroke.width,
+        } : textEl.stroke;
+
+        return {
+          ...textEl,
+          y: scaledY,
+          width: scaledWidth,
+          height: scaledHeight,
+          fontSize: scaledFontSize,
+          bg: scaledBg,
+          shadow: scaledShadow,
+          stroke: scaledStroke,
+        };
+      }
+
+      if (el.type === 'shape') {
+        const shapeEl = el as ShapeElement;
+
+        if (shapeEl.shapeType === 'circle') {
+          // Circle keeps 1:1 ratio, scale width and height, adjust X to keep horizontal center aligned
+          const scaledWidthHeight = Math.max(20, Math.round(shapeEl.height * scaleFactor));
+          const centerX = shapeEl.x + shapeEl.width / 2;
+          const scaledX = Math.round(centerX - scaledWidthHeight / 2);
+
+          return {
+            ...shapeEl,
+            x: scaledX,
+            y: scaledY,
+            width: scaledWidthHeight,
+            height: scaledWidthHeight,
+            strokeWidth: shapeEl.strokeWidth ? Math.max(1, Math.round(shapeEl.strokeWidth * scaleFactor)) : shapeEl.strokeWidth,
+          };
+        } else {
+          // For rect or line, we scale height, but keep width and X unchanged to fit perfectly across 600px width
+          const scaledHeight = Math.max(2, Math.round(shapeEl.height * scaleFactor));
+          return {
+            ...shapeEl,
+            y: scaledY,
+            height: scaledHeight,
+            strokeWidth: shapeEl.strokeWidth ? Math.max(1, Math.round(shapeEl.strokeWidth * scaleFactor)) : shapeEl.strokeWidth,
+          };
+        }
+      }
+
+      if (el.type === 'sticker') {
+        // Stickers / emojis must remain proportional
+        const scaledHeight = Math.max(15, Math.round(el.height * scaleFactor));
+        const scaledWidth = Math.max(15, Math.round(el.width * scaleFactor));
+
+        // Adjust X to preserve horizontal center position
+        const centerX = el.x + el.width / 2;
+        const scaledX = Math.round(centerX - scaledWidth / 2);
+
+        return {
+          ...el,
+          x: scaledX,
+          y: scaledY,
+          width: scaledWidth,
+          height: scaledHeight,
+        };
+      }
+
+      // Default fallback
+      return {
+        ...el,
+        y: scaledY,
+        height: Math.max(10, Math.round(el.height * scaleFactor)),
+      };
+    });
+
+    setAspectRatio(newRatio);
+    setElements(scaledElements);
+    commitToHistory(newRatio, background, scaledElements);
+    showToast(`📐 已将画布调整为 ${newRatio}，并自动按比例缩放适配所有图层！`, 'info');
+  };
+
   // Handle undo
   const handleUndo = () => {
     if (historyIndex > 0) {
@@ -743,7 +860,7 @@ export default function App() {
         {/* Right side styling control sliders and tabs */}
         <EditorPanel
           aspectRatio={aspectRatio}
-          setAspectRatio={setAspectRatio}
+          setAspectRatio={handleSetAspectRatio}
           background={background}
           setBackground={setBackground}
           elements={elements}
